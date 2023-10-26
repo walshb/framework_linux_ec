@@ -31,7 +31,9 @@ cp -av $LINUX_SRC/drivers/mfd/cros_ec_dev.c $OUTDIR/fwk_ec_dev.c
 
 cd $LINUX_SRC/drivers/platform/chrome
 
-for FNAME in cros_ec* cros_usbpd* cros_typec*
+for FNAME in cros_ec.* cros_ec_trace.* cros_ec_proto.* \
+                       cros_ec_chardev.* cros_ec_lpc* \
+                       cros_ec_debugfs.*
 do
     OUTFNAME=$(echo $FNAME | do_sed)
     cp -av $FNAME $OUTDIR/$OUTFNAME
@@ -45,8 +47,8 @@ echo 'fwk_ec_proto-objs := fwk_ec_proto_src.o fwk_ec_trace.o' >$OUTDIR/Kbuild
 echo 'obj-m += fwk_ec_proto.o' >>$OUTDIR/Kbuild
 echo 'obj-m += fwk_ec_dev.o' >>$OUTDIR/Kbuild
 do_sed -e 's|\$(CONFIG\([^)]*\))|m|' Makefile \
-    | grep -E 'fwk.ec|fwk.usbpd' \
-    | grep -v 'fwk_ec_proto' >>$OUTDIR/Kbuild
+    | grep -E 'fwk_ec\.|fwk_ec_chardev\.|fwk_ec_lpc|fwk_ec_debugfs\.' \
+           >>$OUTDIR/Kbuild
 echo 'ccflags-y=-I$(src)' >>$OUTDIR/Kbuild
 
 do_sed -e 's|linux/platform_data/fwk_|fwk_|' \
