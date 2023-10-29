@@ -15,7 +15,8 @@ MYDIR=$(dirname $(readlink -f "$0"))
 OUTDIR=$MYDIR/src
 
 mkdir -p $OUTDIR
-rm -rf $OUTDIR/*.* $OUTDIR/.??*
+rm -f $OUTDIR/*.? $OUTDIR/modules.order $OUTDIR/Module.symvers \
+   $OUTDIR/*.ko $OUTDIR/.??* $OUTDIR/*.mod
 
 TARGET=$(uname -r)
 

@@ -1,5 +1,11 @@
+VERSION=1.0.0
+
 KERNELRELEASE ?= $(shell uname -r)
 KERNELDIR ?= /lib/modules/$(KERNELRELEASE)/build
+PREFIX ?= /usr
+DESTDIR ?=
+SRCDIR ?= $(PREFIX)/src
+DKMSDIR ?= $(SRCDIR)/fwk_ec-$(VERSION)
 DEPMOD ?= depmod
 DEPMODBASEDIR ?= /
 
@@ -26,4 +32,8 @@ module-install:
 
 install: module-install
 
-.PHONY: all module clean insmod module-install install
+dkms-install:
+	install -D -d -m 755 $(DESTDIR)/$(DKMSDIR)
+	install -v -m 644 *.c *.h Makefile Kbuild dkms.conf $(DESTDIR)/$(DKMSDIR)/
+
+.PHONY: all module clean insmod module-install install dkms-install
