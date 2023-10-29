@@ -6,10 +6,10 @@ DEPMODBASEDIR ?= /
 all: module
 
 module:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) V=1 modules
+	$(MAKE) -C $(KERNELDIR) M=$(CURDIR) V=1 modules
 
 clean:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+	$(MAKE) -C $(KERNELDIR) M=$(CURDIR) clean
 
 insmod:
 	lsmod | grep -E '^(cros.ec|fwk.ec)' | grep -v '_proto' | awk '{print $$1}' | sort -r | xargs -rn1 rmmod
@@ -21,9 +21,9 @@ insmod:
 	insmod fwk_ec_chardev.ko
 
 module-install:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) V=1 modules_install
+	$(MAKE) -C $(KERNELDIR) M=$(CURDIR) V=1 modules_install
 	$(DEPMOD) -b "$(DEPMODBASEDIR)" -a $(KERNELRELEASE)
 
 install: module-install
 
-.PHONY: all module clean module-install install
+.PHONY: all module clean insmod module-install install
