@@ -32,8 +32,10 @@ module-install:
 
 install: module-install
 
+DKMS_SOURCES := $(filter-out %.mod.c, $(wildcard *.c *.h)) Kbuild dkms.conf
+
 dkms-install:
-	install -D -d -m 755 $(DESTDIR)/$(DKMSDIR)
-	install -v -m 644 *.c *.h Makefile Kbuild dkms.conf $(DESTDIR)/$(DKMSDIR)/
+	install -d -m 755 $(DESTDIR)$(DKMSDIR)
+	install -v -m 644 $(DKMS_SOURCES) $(DESTDIR)$(DKMSDIR)/
 
 .PHONY: all module clean insmod module-install install dkms-install
