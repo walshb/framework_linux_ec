@@ -32,7 +32,7 @@ module-install:
 
 install: module-install
 
-DKMS_SOURCES := $(filter-out %.mod.c, $(wildcard *.c *.h)) Kbuild dkms.conf
+DKMS_SOURCES := $(filter-out %.mod.c, $(wildcard *.c *.h)) Kbuild dkms.conf REVISION
 
 dkms-install:
 	install -d -m 755 $(DESTDIR)$(DKMSDIR)

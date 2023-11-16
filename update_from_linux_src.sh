@@ -20,6 +20,10 @@ rm -f $OUTDIR/*.? $OUTDIR/modules.order $OUTDIR/Module.symvers \
 
 TARGET=$(uname -r)
 
+cd $LINUX_SRC
+
+git rev-parse --short HEAD >$OUTDIR/REVISION
+
 cd $LINUX_SRC/include/linux/platform_data
 
 for FNAME in cros_ec*.h cros_usbpd*.h
