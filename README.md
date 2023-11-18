@@ -30,6 +30,9 @@ We have to replace the "cros\_ec\_proto" module which is built in to
 the kernel, so we create a loadable module with a different name. Or,
 we could compile a new kernel but that's a bit more work.
 
+Most of the code is exactly the same as in the upstream kernel. All I
+have done is rename the modules and add the AML mutex locking.
+
 ## Can I compile a new kernel instead?
 
 Yes. Please see [here](https://github.com/walshb/linux), branch
