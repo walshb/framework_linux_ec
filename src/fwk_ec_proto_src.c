@@ -609,9 +609,9 @@ int fwk_ec_cmd_xfer(struct fwk_ec_device *ec_dev, struct fwk_ec_command *msg)
 	int ret;
 
 	ret = ec_dev->ec_mutex_lock(ec_dev);
-	if (ret) {
+	if (ret)
 		return ret;
-	}
+
 	if (ec_dev->proto_version == EC_PROTO_VERSION_UNKNOWN) {
 		ret = fwk_ec_query_all(ec_dev);
 		if (ret) {

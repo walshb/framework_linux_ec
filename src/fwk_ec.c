@@ -160,9 +160,10 @@ static int fwk_ec_ready_event(struct notifier_block *nb,
 
 	if (host_event & EC_HOST_EVENT_MASK(EC_HOST_EVENT_INTERFACE_READY)) {
 		int ret = ec_dev->ec_mutex_lock(ec_dev);
-		if (ret) {
+
+		if (ret)
 			return notifier_from_errno(ret);
-		}
+
 		fwk_ec_query_all(ec_dev);
 		ret = ec_dev->ec_mutex_unlock(ec_dev);
 		return notifier_from_errno(ret);

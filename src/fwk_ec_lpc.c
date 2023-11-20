@@ -34,7 +34,7 @@
 
 #define ACPI_LOCK_DELAY_MS 500
 
-static int n_debug = 0;
+static int n_debug;
 
 /* Index into fwk_ec_lpc_acpi_device_ids of ACPI device */
 static int fwk_ec_lpc_acpi_device_found;
@@ -358,12 +358,11 @@ static int fwk_ec_lpc_mutex_lock(struct fwk_ec_device *ec_dev)
 {
 	bool success = ACPI_SUCCESS(acpi_acquire_mutex(ec_dev->aml_mutex,
 						       NULL, ACPI_LOCK_DELAY_MS));
-	if (n_debug++ < 100) {
-		dev_info(ec_dev->dev,
-			 "fwk_ec_lpc_mutex_lock, result %d", (int)success);
-	}
+	if (n_debug++ < 100)
+		dev_info(ec_dev->dev, "%s, result %d", __func__, (int)success);
+
 	if (!success) {
-		dev_err(ec_dev->dev, "fwk_ec_lpc_mutex_lock failed.");
+		dev_err(ec_dev->dev, "%s failed.", __func__);
 		return -ENODEV;
 	}
 
@@ -374,12 +373,11 @@ static int fwk_ec_lpc_mutex_unlock(struct fwk_ec_device *ec_dev)
 {
 	bool success = ACPI_SUCCESS(acpi_release_mutex(ec_dev->aml_mutex, NULL));
 
-	if (n_debug++ < 100) {
-		dev_info(ec_dev->dev,
-			 "fwk_ec_lpc_mutex_unlock, result %d", (int)success);
-	}
+	if (n_debug++ < 100)
+		dev_info(ec_dev->dev, "%s, result %d", __func__, (int)success);
+
 	if (!success) {
-		dev_err(ec_dev->dev, "fwk_ec_lpc_mutex_unlock failed.");
+		dev_err(ec_dev->dev, "%s failed.", __func__);
 		return -ENODEV;
 	}
 
@@ -389,14 +387,17 @@ static int fwk_ec_lpc_mutex_unlock(struct fwk_ec_device *ec_dev)
 static int fwk_ec_lpc_mutex_setup(struct fwk_ec_device *ec_dev,
 				   acpi_handle parent)
 {
+	int status;
+
 	if (!fwk_ec_lpc_aml_mutex_name) {
 		dev_info(ec_dev->dev, "No ACPI mutex name.");
 		return 0;
 	}
 
-	int status = acpi_get_handle(parent,
-				     (acpi_string)fwk_ec_lpc_aml_mutex_name,
-				     &ec_dev->aml_mutex);
+	status = acpi_get_handle(parent,
+				 (acpi_string)fwk_ec_lpc_aml_mutex_name,
+				 &ec_dev->aml_mutex);
+
 	if (ACPI_FAILURE(status)) {
 		dev_err(ec_dev->dev, "Failed to get AML mutex '%s': error %d",
 			fwk_ec_lpc_aml_mutex_name, status);
@@ -505,9 +506,8 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 
 	if (adev) {
 		ret = fwk_ec_lpc_mutex_setup(ec_dev, adev->handle);
-		if (ret) {
+		if (ret)
 			return ret;
-		}
 	}
 
 	ret = fwk_ec_register(ec_dev);
@@ -631,6 +631,7 @@ static int fwk_ec_lpc_prepare(struct device *dev)
 static void fwk_ec_lpc_complete(struct device *dev)
 {
 	struct fwk_ec_device *ec_dev = dev_get_drvdata(dev);
+
 	fwk_ec_resume(ec_dev);
 }
 #endif
@@ -670,10 +671,10 @@ static struct platform_device fwk_ec_lpc_device = {
 static int fwk_ec_lpc_find_acpi_dev(const struct acpi_device_id *acpi_ids)
 {
 	int i;
+
 	for (i = 0; acpi_ids[i].id[0]; ++i) {
-		if (acpi_dev_present(acpi_ids[i].id, NULL, -1)) {
+		if (acpi_dev_present(acpi_ids[i].id, NULL, -1))
 			return i;
-		}
 	}
 
 	return -1;
