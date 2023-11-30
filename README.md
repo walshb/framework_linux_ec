@@ -36,7 +36,7 @@ have done is rename the modules and add the AML mutex locking.
 ## Can I compile a new kernel instead?
 
 Yes. Please see [here](https://github.com/walshb/linux), branch
-"bw-cros-ec-acpi-mutex".
+"bw-cros-ec-acpi-mutex-dh-v2".
 
 ## Why does `make insmod` dump a stack trace in the log?
 
