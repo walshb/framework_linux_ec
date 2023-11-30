@@ -29,7 +29,6 @@
 #include "fwk_ec_lpc_mec.h"
 
 #define DRV_NAME "fwk_ec_lpcs"
-#define ACPI_DRV_NAME "GOOG0004"
 #define GOOG_DEV_IDX 0
 
 #define ACPI_LOCK_DELAY_MS 500
@@ -39,7 +38,37 @@ static int n_debug;
 /* Index into fwk_ec_lpc_acpi_device_ids of ACPI device */
 static int fwk_ec_lpc_acpi_device_found;
 
-static const char *fwk_ec_lpc_aml_mutex_name;
+/*
+ * Indicates that the driver should only reserve 0xFF I/O ports
+ * (rather than 0x100) for the host command mapped memory region.
+ */
+#define FWK_EC_LPC_QUIRK_SHORT_HOSTCMD_RESERVATION BIT(0)
+/*
+ * Indicates that lpc_driver_data.quirk_mmio_memory_base should
+ * be used as the base port for EC mapped memory.
+ */
+#define FWK_EC_LPC_QUIRK_REMAP_MEMORY              BIT(1)
+
+/**
+ * struct lpc_driver_data - driver data attached to a DMI device ID to indicate
+ *                          hardware quirks.
+ * @quirks: a bitfield composed of quirks from FWK_EC_LPC_QUIRK_*
+ * @quirk_mmio_memory_base: The first I/O port addressing EC mapped memory (used
+ *                          when quirks (...REMAP_MEMORY) is set.
+ */
+struct lpc_driver_data {
+	u32 quirks;
+	u16 quirk_mmio_memory_base;
+	const char *aml_mutex_name;
+};
+
+/**
+ * struct fwk_ec_lpc - LPC device-specific data
+ * @mmio_memory_base: The first I/O port addressing EC mapped memory.
+ */
+struct fwk_ec_lpc {
+	u16 mmio_memory_base;
+};
 
 /**
  * struct lpc_driver_ops - LPC driver operations
@@ -54,6 +83,8 @@ struct lpc_driver_ops {
 };
 
 static struct lpc_driver_ops fwk_ec_lpc_ops = { };
+
+static const struct lpc_driver_data *fwk_ec_lpc_driver_data;
 
 /*
  * A generic instance of the read function of struct lpc_driver_ops, used for
@@ -297,6 +328,7 @@ done:
 static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
 			       unsigned int bytes, void *dest)
 {
+	struct fwk_ec_lpc *ec_lpc = ec->priv;
 	int i = offset;
 	char *s = dest;
 	int cnt = 0;
@@ -306,13 +338,13 @@ static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
 
 	/* fixed length */
 	if (bytes) {
-		fwk_ec_lpc_ops.read(EC_LPC_ADDR_MEMMAP + offset, bytes, s);
+		fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + offset, bytes, s);
 		return bytes;
 	}
 
 	/* string */
 	for (; i < EC_MEMMAP_SIZE; i++, s++) {
-		fwk_ec_lpc_ops.read(EC_LPC_ADDR_MEMMAP + i, 1, s);
+		fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + i, 1, s);
 		cnt++;
 		if (!*s)
 			break;
@@ -385,27 +417,27 @@ static int fwk_ec_lpc_mutex_unlock(struct fwk_ec_device *ec_dev)
 }
 
 static int fwk_ec_lpc_mutex_setup(struct fwk_ec_device *ec_dev,
-				   acpi_handle parent)
+				   acpi_handle parent,
+				   const char *aml_mutex_name)
 {
 	int status;
 
-	if (!fwk_ec_lpc_aml_mutex_name) {
+	if (!aml_mutex_name) {
 		dev_info(ec_dev->dev, "No ACPI mutex name.");
 		return 0;
 	}
 
 	status = acpi_get_handle(parent,
-				 (acpi_string)fwk_ec_lpc_aml_mutex_name,
+				 (acpi_string)aml_mutex_name,
 				 &ec_dev->aml_mutex);
-
 	if (ACPI_FAILURE(status)) {
 		dev_err(ec_dev->dev, "Failed to get AML mutex '%s': error %d",
-			fwk_ec_lpc_aml_mutex_name, status);
+			aml_mutex_name, status);
 		return -ENOENT;
 	}
 
 	dev_info(ec_dev->dev, "Got AML mutex '%s'",
-		 fwk_ec_lpc_aml_mutex_name);
+		 aml_mutex_name);
 
 	ec_dev->ec_mutex_lock = fwk_ec_lpc_mutex_lock;
 	ec_dev->ec_mutex_unlock = fwk_ec_lpc_mutex_unlock;
@@ -419,8 +451,31 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	struct acpi_device *adev;
 	acpi_status status;
 	struct fwk_ec_device *ec_dev;
+	struct fwk_ec_lpc *ec_lpc;
+	int region1_size = EC_HOST_CMD_REGION_SIZE;
 	u8 buf[2] = {};
 	int irq, ret;
+	u32 quirks = 0;
+
+	ec_lpc = devm_kzalloc(dev, sizeof(*ec_lpc), GFP_KERNEL);
+	if (!ec_lpc)
+		return -ENOMEM;
+
+	ec_lpc->mmio_memory_base = EC_LPC_ADDR_MEMMAP;
+
+	if (fwk_ec_lpc_driver_data) {
+		quirks = fwk_ec_lpc_driver_data->quirks;
+
+		if (quirks)
+			dev_info(dev, "loaded with quirks %8.08x\n", quirks);
+
+		if (quirks & FWK_EC_LPC_QUIRK_REMAP_MEMORY)
+			ec_lpc->mmio_memory_base
+			    = fwk_ec_lpc_driver_data->quirk_mmio_memory_base;
+
+		if (quirks & FWK_EC_LPC_QUIRK_SHORT_HOSTCMD_RESERVATION)
+			region1_size -= 1;
+	}
 
 	/*
 	 * The Framework Laptop (and possibly other non-ChromeOS devices)
@@ -446,7 +501,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	fwk_ec_lpc_ops.write = fwk_ec_lpc_mec_write_bytes;
 	fwk_ec_lpc_ops.read(EC_LPC_ADDR_MEMMAP + EC_MEMMAP_ID, 2, buf);
 	if (buf[0] != 'E' || buf[1] != 'C') {
-		if (!devm_request_region(dev, EC_LPC_ADDR_MEMMAP, EC_MEMMAP_SIZE,
+		if (!devm_request_region(dev, ec_lpc->mmio_memory_base, EC_MEMMAP_SIZE,
 					 dev_name(dev))) {
 			dev_err(dev, "couldn't reserve memmap region\n");
 			return -EBUSY;
@@ -455,7 +510,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 		/* Re-assign read/write operations for the non MEC variant */
 		fwk_ec_lpc_ops.read = fwk_ec_lpc_read_bytes;
 		fwk_ec_lpc_ops.write = fwk_ec_lpc_write_bytes;
-		fwk_ec_lpc_ops.read(EC_LPC_ADDR_MEMMAP + EC_MEMMAP_ID, 2,
+		fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + EC_MEMMAP_ID, 2,
 				     buf);
 		if (buf[0] != 'E' || buf[1] != 'C') {
 			dev_err(dev, "EC ID not detected\n");
@@ -470,7 +525,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 			return -EBUSY;
 		}
 		if (!devm_request_region(dev, EC_HOST_CMD_REGION1,
-					 EC_HOST_CMD_REGION_SIZE, dev_name(dev))) {
+					 region1_size, dev_name(dev))) {
 			dev_err(dev, "couldn't reserve region1\n");
 			return -EBUSY;
 		}
@@ -489,6 +544,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	ec_dev->din_size = sizeof(struct ec_host_response) +
 			   sizeof(struct ec_response_get_protocol_info);
 	ec_dev->dout_size = sizeof(struct ec_host_request);
+	ec_dev->priv = ec_lpc;
 
 	/*
 	 * Some boards do not have an IRQ allotted for fwk_ec_lpc,
@@ -504,8 +560,9 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 
 	adev = ACPI_COMPANION(dev);
 
-	if (adev) {
-		ret = fwk_ec_lpc_mutex_setup(ec_dev, adev->handle);
+	if (adev && fwk_ec_lpc_driver_data) {
+		ret = fwk_ec_lpc_mutex_setup(ec_dev, adev->handle,
+					      fwk_ec_lpc_driver_data->aml_mutex_name);
 		if (ret)
 			return ret;
 	}
@@ -533,7 +590,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int fwk_ec_lpc_remove(struct platform_device *pdev)
+static void fwk_ec_lpc_remove(struct platform_device *pdev)
 {
 	struct fwk_ec_device *ec_dev = platform_get_drvdata(pdev);
 	struct acpi_device *adev;
@@ -544,16 +601,26 @@ static int fwk_ec_lpc_remove(struct platform_device *pdev)
 					   fwk_ec_lpc_acpi_notify);
 
 	fwk_ec_unregister(ec_dev);
-
-	return 0;
 }
 
 static const struct acpi_device_id fwk_ec_lpc_acpi_device_ids[] = {
-	{ ACPI_DRV_NAME, 0 },  /* GOOG_DEV_IDX */
-	{"PNP0C09", 0},
+	{ "GOOG0004", 0 },  /* GOOG_DEV_IDX refers to this one */
+	{ "PNP0C09", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, fwk_ec_lpc_acpi_device_ids);
+
+static const struct lpc_driver_data framework_laptop_amd_lpc_driver_data __initconst = {
+	.quirks =
+		FWK_EC_LPC_QUIRK_REMAP_MEMORY |
+		FWK_EC_LPC_QUIRK_SHORT_HOSTCMD_RESERVATION,
+	.quirk_mmio_memory_base = 0xE00,
+	.aml_mutex_name = "ECMT",
+};
+
+static const struct lpc_driver_data framework_laptop_11_lpc_driver_data __initconst = {
+	.aml_mutex_name = "ECMT",
+};
 
 static const struct dmi_system_id fwk_ec_lpc_dmi_table[] __initconst = {
 	{
@@ -609,12 +676,21 @@ static const struct dmi_system_id fwk_ec_lpc_dmi_table[] __initconst = {
 	},
 	/* A small number of non-Chromebook/box machines also use the ChromeOS EC */
 	{
-		/* the Framework Laptop */
+		/* the Framework Laptop 13 (AMD Ryzen) and 16 (AMD Ryzen) */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Framework"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "AMD Ryzen"),
+			DMI_MATCH(DMI_PRODUCT_FAMILY, "Laptop"),
+		},
+		.driver_data = (void *)&framework_laptop_amd_lpc_driver_data,
+	},
+	{
+		/* the Framework Laptop (Intel 11th, 12th, 13th Generation) */
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Framework"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "Laptop"),
 		},
-		.driver_data = "ECMT",
+		.driver_data = (void *)&framework_laptop_11_lpc_driver_data,
 	},
 	{ /* sentinel */ }
 };
@@ -624,23 +700,36 @@ MODULE_DEVICE_TABLE(dmi, fwk_ec_lpc_dmi_table);
 static int fwk_ec_lpc_prepare(struct device *dev)
 {
 	struct fwk_ec_device *ec_dev = dev_get_drvdata(dev);
-
-	return fwk_ec_suspend(ec_dev);
+	return fwk_ec_suspend_prepare(ec_dev);
 }
 
 static void fwk_ec_lpc_complete(struct device *dev)
 {
 	struct fwk_ec_device *ec_dev = dev_get_drvdata(dev);
+	fwk_ec_resume_complete(ec_dev);
+}
 
-	fwk_ec_resume(ec_dev);
+static int fwk_ec_lpc_suspend_late(struct device *dev)
+{
+	struct fwk_ec_device *ec_dev = dev_get_drvdata(dev);
+
+	return fwk_ec_suspend_late(ec_dev);
+}
+
+static int fwk_ec_lpc_resume_early(struct device *dev)
+{
+	struct fwk_ec_device *ec_dev = dev_get_drvdata(dev);
+
+	return fwk_ec_resume_early(ec_dev);
 }
 #endif
 
 static const struct dev_pm_ops fwk_ec_lpc_pm_ops = {
 #ifdef CONFIG_PM_SLEEP
 	.prepare = fwk_ec_lpc_prepare,
-	.complete = fwk_ec_lpc_complete
+	.complete = fwk_ec_lpc_complete,
 #endif
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(fwk_ec_lpc_suspend_late, fwk_ec_lpc_resume_early)
 };
 
 static struct platform_driver fwk_ec_lpc_driver = {
@@ -656,7 +745,7 @@ static struct platform_driver fwk_ec_lpc_driver = {
 		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 	.probe = fwk_ec_lpc_probe,
-	.remove = fwk_ec_lpc_remove,
+	.remove_new = fwk_ec_lpc_remove,
 };
 
 static void fwk_ec_lpc_device_release(struct device *dev)
@@ -683,19 +772,18 @@ static int fwk_ec_lpc_find_acpi_dev(const struct acpi_device_id *acpi_ids)
 static int __init fwk_ec_lpc_init(void)
 {
 	int ret;
+	const struct dmi_system_id *dmi_match;
 
 	fwk_ec_lpc_acpi_device_found
 	    = fwk_ec_lpc_find_acpi_dev(fwk_ec_lpc_driver.driver.acpi_match_table);
 
-	if (fwk_ec_lpc_acpi_device_found != GOOG_DEV_IDX) {
-		const struct dmi_system_id *dmi_id = dmi_first_match(fwk_ec_lpc_dmi_table);
+	dmi_match = dmi_first_match(fwk_ec_lpc_dmi_table);
 
-		if (!dmi_id) {
-			pr_err(DRV_NAME ": unsupported system.\n");
-			return -ENODEV;
-		}
-
-		fwk_ec_lpc_aml_mutex_name = (const char *)dmi_id->driver_data;
+	if (dmi_match) {
+		fwk_ec_lpc_driver_data = dmi_match->driver_data;
+	} else if (fwk_ec_lpc_acpi_device_found != GOOG_DEV_IDX) {
+		pr_err(DRV_NAME ": unsupported system.\n");
+		return -ENODEV;
 	}
 
 	/* Register the driver */

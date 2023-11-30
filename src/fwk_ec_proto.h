@@ -263,7 +263,7 @@ bool fwk_ec_check_features(struct fwk_ec_dev *ec, int feature);
 
 int fwk_ec_get_sensor_count(struct fwk_ec_dev *ec);
 
-int fwk_ec_cmd(struct fwk_ec_device *ec_dev, unsigned int version, int command, void *outdata,
+int fwk_ec_cmd(struct fwk_ec_device *ec_dev, unsigned int version, int command, const void *outdata,
 		    size_t outsize, void *indata, size_t insize);
 
 /**

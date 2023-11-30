@@ -1007,7 +1007,7 @@ EXPORT_SYMBOL_GPL(fwk_ec_get_sensor_count);
 int fwk_ec_cmd(struct fwk_ec_device *ec_dev,
 		unsigned int version,
 		int command,
-		void *outdata,
+		const void *outdata,
 		size_t outsize,
 		void *indata,
 		size_t insize)

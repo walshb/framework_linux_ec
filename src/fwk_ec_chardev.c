@@ -404,13 +404,11 @@ static int fwk_ec_chardev_probe(struct platform_device *pdev)
 	return misc_register(&data->misc);
 }
 
-static int fwk_ec_chardev_remove(struct platform_device *pdev)
+static void fwk_ec_chardev_remove(struct platform_device *pdev)
 {
 	struct chardev_data *data = dev_get_drvdata(&pdev->dev);
 
 	misc_deregister(&data->misc);
-
-	return 0;
 }
 
 static struct platform_driver fwk_ec_chardev_driver = {
@@ -418,7 +416,7 @@ static struct platform_driver fwk_ec_chardev_driver = {
 		.name = DRV_NAME,
 	},
 	.probe = fwk_ec_chardev_probe,
-	.remove = fwk_ec_chardev_remove,
+	.remove_new = fwk_ec_chardev_remove,
 };
 
 module_platform_driver(fwk_ec_chardev_driver);
