@@ -31,7 +31,9 @@ the kernel, so we create a loadable module with a different name. Or,
 we could compile a new kernel but that's a bit more work.
 
 Most of the code is exactly the same as in the upstream kernel. All I
-have done is rename the modules and add the AML mutex locking.
+have done is rename the modules and add the AML mutex locking and
+Dustin L. Howett's AMD Framework patches from
+[here](https://lore.kernel.org/chrome-platform/20231126192452.97824-1-dustin@howett.net/).
 
 ## Can I compile a new kernel instead?
 
