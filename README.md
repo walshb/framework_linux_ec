@@ -24,6 +24,11 @@ sudo make insmod
 This just performs `insmod`, and does not install in /lib/modules, so
 the changes won't persist over reboot.
 
+If you have Secure Boot enabled, then the insmod will fail because the
+modules aren't signed. You can manually sign them with your MOK, but
+probably easier is to install via DKMS (see below), which will
+automatically take care of the signing process.
+
 ## Why are the modules called "fwk\_ec\_\*", not "cros\_ec\_\*"?
 
 We have to replace the "cros\_ec\_proto" module which is built in to
@@ -61,6 +66,9 @@ fwk_ec_lpcs PNP0C09:00: fwk_ec_lpc_mutex_lock, result 1
 fwk_ec_lpcs PNP0C09:00: fwk_ec_lpc_mutex_unlock, result 1
 fwk_ec_lpcs PNP0C09:00: Chrome EC device registered
 ```
+After this, the first 100 `fwk_ec_lpc_mutex_{un,}lock` calls will be
+logged, and should correlate with `ectool` usage, giving further
+confidence that the modules are working correctly.
 
 ## How do I make changes persist over reboot?
 
@@ -75,4 +83,5 @@ sudo make dkms-install
 sudo dkms add -m fwk_ec -v 2.0.0
 sudo dkms autoinstall
 sudo install -m 644 ../extras/cros_ec_blacklist.conf /etc/modprobe.d/
+sudo update-initramfs -u
 ```
