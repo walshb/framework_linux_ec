@@ -80,7 +80,7 @@ sudo apt install dkms  # or whatever your distro requires
 cd src
 make
 sudo make dkms-install
-sudo dkms add -m fwk_ec -v 2.0.0
+sudo dkms add -m fwk_ec -v 2.1.0
 sudo dkms autoinstall
 sudo install -m 644 ../extras/cros_ec_blacklist.conf /etc/modprobe.d/
 sudo update-initramfs -u

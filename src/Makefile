@@ -1,4 +1,4 @@
-VERSION=2.0.0
+VERSION=2.1.0
 
 KERNELRELEASE ?= $(shell uname -r)
 KERNELDIR ?= /lib/modules/$(KERNELRELEASE)/build
