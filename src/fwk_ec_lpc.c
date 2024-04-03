@@ -324,9 +324,8 @@ done:
 	return ret;
 }
 
-/* Returns num bytes read, or negative on error. Doesn't need locking. */
-static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
-			       unsigned int bytes, void *dest)
+static int fwk_ec_lpc_readmem_nolock(struct fwk_ec_device *ec, unsigned int offset,
+				      unsigned int bytes, void *dest)
 {
 	struct fwk_ec_lpc *ec_lpc = ec->priv;
 	int i = offset;
@@ -351,6 +350,21 @@ static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
 	}
 
 	return cnt;
+}
+
+static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
+			       unsigned int bytes, void *dest)
+{
+	int ret = ec->ec_mutex_lock(ec);
+
+	if (ret)
+		return ret;
+
+	ret = fwk_ec_lpc_readmem_nolock(ec, offset, bytes, dest);
+
+	ec->ec_mutex_unlock(ec);
+
+	return ret;
 }
 
 static void fwk_ec_lpc_acpi_notify(acpi_handle device, u32 value, void *data)
@@ -416,9 +430,9 @@ static int fwk_ec_lpc_mutex_unlock(struct fwk_ec_device *ec_dev)
 	return 0;
 }
 
-static int fwk_ec_lpc_mutex_setup(struct fwk_ec_device *ec_dev,
-				   acpi_handle parent,
-				   const char *aml_mutex_name)
+static int fwk_ec_lpc_mutex_init(struct fwk_ec_device *ec_dev,
+				  acpi_handle parent,
+				  const char *aml_mutex_name)
 {
 	int status;
 
@@ -499,7 +513,33 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	 */
 	fwk_ec_lpc_ops.read = fwk_ec_lpc_mec_read_bytes;
 	fwk_ec_lpc_ops.write = fwk_ec_lpc_mec_write_bytes;
-	fwk_ec_lpc_ops.read(EC_LPC_ADDR_MEMMAP + EC_MEMMAP_ID, 2, buf);
+
+	ec_dev = devm_kzalloc(dev, sizeof(*ec_dev), GFP_KERNEL);
+	if (!ec_dev)
+		return -ENOMEM;
+
+	platform_set_drvdata(pdev, ec_dev);
+	ec_dev->dev = dev;
+	ec_dev->phys_name = dev_name(dev);
+	ec_dev->cmd_xfer = fwk_ec_cmd_xfer_lpc;
+	ec_dev->pkt_xfer = fwk_ec_pkt_xfer_lpc;
+	ec_dev->cmd_readmem = fwk_ec_lpc_readmem_nolock;
+	ec_dev->din_size = sizeof(struct ec_host_response) +
+			   sizeof(struct ec_response_get_protocol_info);
+	ec_dev->dout_size = sizeof(struct ec_host_request);
+	ec_dev->priv = ec_lpc;
+
+	adev = ACPI_COMPANION(dev);
+
+	if (adev && fwk_ec_lpc_driver_data) {
+		ret = fwk_ec_lpc_mutex_init(ec_dev, adev->handle,
+					     fwk_ec_lpc_driver_data->aml_mutex_name);
+		if (ret)
+			return ret;
+		ec_dev->cmd_readmem = fwk_ec_lpc_readmem;
+	}
+
+	ret = ec_dev->cmd_readmem(ec_dev, EC_MEMMAP_ID, 2, buf);
 	if (buf[0] != 'E' || buf[1] != 'C') {
 		if (!devm_request_region(dev, ec_lpc->mmio_memory_base, EC_MEMMAP_SIZE,
 					 dev_name(dev))) {
@@ -510,8 +550,9 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 		/* Re-assign read/write operations for the non MEC variant */
 		fwk_ec_lpc_ops.read = fwk_ec_lpc_read_bytes;
 		fwk_ec_lpc_ops.write = fwk_ec_lpc_write_bytes;
-		fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + EC_MEMMAP_ID, 2,
-				     buf);
+		ec_dev->cmd_readmem = fwk_ec_lpc_readmem_nolock;
+
+		ec_dev->cmd_readmem(ec_dev, EC_MEMMAP_ID, 2, buf);
 		if (buf[0] != 'E' || buf[1] != 'C') {
 			dev_err(dev, "EC ID not detected\n");
 			return -ENODEV;
@@ -531,21 +572,6 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 		}
 	}
 
-	ec_dev = devm_kzalloc(dev, sizeof(*ec_dev), GFP_KERNEL);
-	if (!ec_dev)
-		return -ENOMEM;
-
-	platform_set_drvdata(pdev, ec_dev);
-	ec_dev->dev = dev;
-	ec_dev->phys_name = dev_name(dev);
-	ec_dev->cmd_xfer = fwk_ec_cmd_xfer_lpc;
-	ec_dev->pkt_xfer = fwk_ec_pkt_xfer_lpc;
-	ec_dev->cmd_readmem = fwk_ec_lpc_readmem;
-	ec_dev->din_size = sizeof(struct ec_host_response) +
-			   sizeof(struct ec_response_get_protocol_info);
-	ec_dev->dout_size = sizeof(struct ec_host_request);
-	ec_dev->priv = ec_lpc;
-
 	/*
 	 * Some boards do not have an IRQ allotted for fwk_ec_lpc,
 	 * which makes ENXIO an expected (and safe) scenario.
@@ -556,15 +582,6 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	else if (irq != -ENXIO) {
 		dev_err(dev, "couldn't retrieve IRQ number (%d)\n", irq);
 		return irq;
-	}
-
-	adev = ACPI_COMPANION(dev);
-
-	if (adev && fwk_ec_lpc_driver_data) {
-		ret = fwk_ec_lpc_mutex_setup(ec_dev, adev->handle,
-					      fwk_ec_lpc_driver_data->aml_mutex_name);
-		if (ret)
-			return ret;
 	}
 
 	ret = fwk_ec_register(ec_dev);

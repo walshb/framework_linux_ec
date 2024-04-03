@@ -319,7 +319,6 @@ static long fwk_ec_chardev_ioctl_readmem(struct fwk_ec_dev *ec,
 	struct fwk_ec_device *ec_dev = ec->ec_dev;
 	struct fwk_ec_readmem s_mem = { };
 	long num;
-	int ret;
 
 	/* Not every platform supports direct reads */
 	if (!ec_dev->cmd_readmem)
@@ -331,15 +330,8 @@ static long fwk_ec_chardev_ioctl_readmem(struct fwk_ec_dev *ec,
 	if (s_mem.bytes > sizeof(s_mem.buffer))
 		return -EINVAL;
 
-	ret = ec_dev->ec_mutex_lock(ec_dev);
-	if (ret)
-		return ret;
-
 	num = ec_dev->cmd_readmem(ec_dev, s_mem.offset, s_mem.bytes,
 				  s_mem.buffer);
-
-	ec_dev->ec_mutex_unlock(ec_dev);
-
 	if (num <= 0)
 		return num;
 
