@@ -35,15 +35,16 @@ We have to replace the "cros\_ec\_proto" module which is built in to
 the kernel, so we create a loadable module with a different name. Or,
 we could compile a new kernel but that's a bit more work.
 
-Most of the code is exactly the same as in the upstream kernel. All I
-have done is rename the modules and add the AML mutex locking and
-Dustin L. Howett's AMD Framework patches from
-[here](https://lore.kernel.org/chrome-platform/20231126192452.97824-1-dustin@howett.net/).
+Most of the code is exactly the same as in the upstream Linux
+chrome-platform
+[for-next](https://git.kernel.org/pub/scm/linux/kernel/git/chrome-platform/linux.git/log/?h=for-next)
+branch. All I have done is rename the modules and add the AML mutex
+locking.
 
 ## Can I compile a new kernel instead?
 
 Yes. Please see [here](https://github.com/walshb/linux), branch
-"bw-cros-ec-acpi-mutex-dh-v2".
+"bw-cros-ec-acpi-mutex-dh-v3".
 
 ## Why does `make insmod` dump a stack trace in the log?
 
