@@ -39,22 +39,17 @@ static int n_debug;
 static int fwk_ec_lpc_acpi_device_found;
 
 /*
- * Indicates that the driver should only reserve 0xFF I/O ports
- * (rather than 0x100) for the host command mapped memory region.
- */
-#define FWK_EC_LPC_QUIRK_SHORT_HOSTCMD_RESERVATION BIT(0)
-/*
  * Indicates that lpc_driver_data.quirk_mmio_memory_base should
  * be used as the base port for EC mapped memory.
  */
-#define FWK_EC_LPC_QUIRK_REMAP_MEMORY              BIT(1)
+#define FWK_EC_LPC_QUIRK_REMAP_MEMORY              BIT(0)
 
 /**
  * struct lpc_driver_data - driver data attached to a DMI device ID to indicate
  *                          hardware quirks.
  * @quirks: a bitfield composed of quirks from FWK_EC_LPC_QUIRK_*
  * @quirk_mmio_memory_base: The first I/O port addressing EC mapped memory (used
- *                          when quirks (...REMAP_MEMORY) is set.
+ *                          when quirk ...REMAP_MEMORY is set.)
  */
 struct lpc_driver_data {
 	u32 quirks;
@@ -466,10 +461,9 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	acpi_status status;
 	struct fwk_ec_device *ec_dev;
 	struct fwk_ec_lpc *ec_lpc;
-	int region1_size = EC_HOST_CMD_REGION_SIZE;
 	u8 buf[2] = {};
 	int irq, ret;
-	u32 quirks = 0;
+	u32 quirks;
 
 	ec_lpc = devm_kzalloc(dev, sizeof(*ec_lpc), GFP_KERNEL);
 	if (!ec_lpc)
@@ -486,9 +480,6 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 		if (quirks & FWK_EC_LPC_QUIRK_REMAP_MEMORY)
 			ec_lpc->mmio_memory_base
 			    = fwk_ec_lpc_driver_data->quirk_mmio_memory_base;
-
-		if (quirks & FWK_EC_LPC_QUIRK_SHORT_HOSTCMD_RESERVATION)
-			region1_size -= 1;
 	}
 
 	/*
@@ -566,7 +557,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 			return -EBUSY;
 		}
 		if (!devm_request_region(dev, EC_HOST_CMD_REGION1,
-					 region1_size, dev_name(dev))) {
+					 EC_HOST_CMD_REGION_SIZE, dev_name(dev))) {
 			dev_err(dev, "couldn't reserve region1\n");
 			return -EBUSY;
 		}
@@ -628,9 +619,7 @@ static const struct acpi_device_id fwk_ec_lpc_acpi_device_ids[] = {
 MODULE_DEVICE_TABLE(acpi, fwk_ec_lpc_acpi_device_ids);
 
 static const struct lpc_driver_data framework_laptop_amd_lpc_driver_data __initconst = {
-	.quirks =
-		FWK_EC_LPC_QUIRK_REMAP_MEMORY |
-		FWK_EC_LPC_QUIRK_SHORT_HOSTCMD_RESERVATION,
+	.quirks = FWK_EC_LPC_QUIRK_REMAP_MEMORY,
 	.quirk_mmio_memory_base = 0xE00,
 	.aml_mutex_name = "ECMT",
 };

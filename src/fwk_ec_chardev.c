@@ -14,6 +14,7 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
+#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <fwk_ec_chardev.h>
@@ -403,17 +404,23 @@ static void fwk_ec_chardev_remove(struct platform_device *pdev)
 	misc_deregister(&data->misc);
 }
 
+static const struct platform_device_id fwk_ec_chardev_id[] = {
+	{ DRV_NAME, 0 },
+	{}
+};
+MODULE_DEVICE_TABLE(platform, fwk_ec_chardev_id);
+
 static struct platform_driver fwk_ec_chardev_driver = {
 	.driver = {
 		.name = DRV_NAME,
 	},
 	.probe = fwk_ec_chardev_probe,
 	.remove_new = fwk_ec_chardev_remove,
+	.id_table = fwk_ec_chardev_id,
 };
 
 module_platform_driver(fwk_ec_chardev_driver);
 
-MODULE_ALIAS("platform:" DRV_NAME);
 MODULE_AUTHOR("Enric Balletbo i Serra <enric.balletbo@collabora.com>");
 MODULE_DESCRIPTION("ChromeOS EC Miscellaneous Character Driver");
 MODULE_LICENSE("GPL");
