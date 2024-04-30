@@ -431,11 +431,6 @@ static int fwk_ec_lpc_mutex_init(struct fwk_ec_device *ec_dev,
 {
 	int status;
 
-	if (!aml_mutex_name) {
-		dev_info(ec_dev->dev, "No ACPI mutex name.");
-		return 0;
-	}
-
 	status = acpi_get_handle(parent,
 				 (acpi_string)aml_mutex_name,
 				 &ec_dev->aml_mutex);
@@ -494,7 +489,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	}
 
 	fwk_ec_lpc_mec_init(EC_HOST_CMD_REGION0,
-			     EC_LPC_ADDR_MEMMAP + EC_MEMMAP_SIZE);
+			     ec_lpc->mmio_memory_base + EC_MEMMAP_SIZE);
 
 	/*
 	 * Read the mapped ID twice, the first one is assuming the
@@ -522,7 +517,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 
 	adev = ACPI_COMPANION(dev);
 
-	if (adev && fwk_ec_lpc_driver_data) {
+	if (adev && fwk_ec_lpc_driver_data && fwk_ec_lpc_driver_data->aml_mutex_name) {
 		ret = fwk_ec_lpc_mutex_init(ec_dev, adev->handle,
 					     fwk_ec_lpc_driver_data->aml_mutex_name);
 		if (ret)
@@ -531,7 +526,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	}
 
 	ret = ec_dev->cmd_readmem(ec_dev, EC_MEMMAP_ID, 2, buf);
-	if (buf[0] != 'E' || buf[1] != 'C') {
+	if (ret != 2 || buf[0] != 'E' || buf[1] != 'C') {
 		if (!devm_request_region(dev, ec_lpc->mmio_memory_base, EC_MEMMAP_SIZE,
 					 dev_name(dev))) {
 			dev_err(dev, "couldn't reserve memmap region\n");
@@ -543,8 +538,8 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 		fwk_ec_lpc_ops.write = fwk_ec_lpc_write_bytes;
 		ec_dev->cmd_readmem = fwk_ec_lpc_readmem_nolock;
 
-		ec_dev->cmd_readmem(ec_dev, EC_MEMMAP_ID, 2, buf);
-		if (buf[0] != 'E' || buf[1] != 'C') {
+		ret = ec_dev->cmd_readmem(ec_dev, EC_MEMMAP_ID, 2, buf);
+		if (ret != 2 || buf[0] != 'E' || buf[1] != 'C') {
 			dev_err(dev, "EC ID not detected\n");
 			return -ENODEV;
 		}
@@ -621,7 +616,6 @@ MODULE_DEVICE_TABLE(acpi, fwk_ec_lpc_acpi_device_ids);
 static const struct lpc_driver_data framework_laptop_amd_lpc_driver_data __initconst = {
 	.quirks = FWK_EC_LPC_QUIRK_REMAP_MEMORY,
 	.quirk_mmio_memory_base = 0xE00,
-	.aml_mutex_name = "ECMT",
 };
 
 static const struct lpc_driver_data framework_laptop_11_lpc_driver_data __initconst = {
