@@ -608,16 +608,13 @@ int fwk_ec_cmd_xfer(struct fwk_ec_device *ec_dev, struct fwk_ec_command *msg)
 {
 	int ret;
 
-	ret = ec_dev->ec_mutex_lock(ec_dev);
-	if (ret)
-		return ret;
-
+	mutex_lock(&ec_dev->lock);
 	if (ec_dev->proto_version == EC_PROTO_VERSION_UNKNOWN) {
 		ret = fwk_ec_query_all(ec_dev);
 		if (ret) {
 			dev_err(ec_dev->dev,
 				"EC version unknown and query failed; aborting command\n");
-			ec_dev->ec_mutex_unlock(ec_dev);
+			mutex_unlock(&ec_dev->lock);
 			return ret;
 		}
 	}
@@ -633,7 +630,7 @@ int fwk_ec_cmd_xfer(struct fwk_ec_device *ec_dev, struct fwk_ec_command *msg)
 				"request of size %u is too big (max: %u)\n",
 				msg->outsize,
 				ec_dev->max_request);
-			ec_dev->ec_mutex_unlock(ec_dev);
+			mutex_unlock(&ec_dev->lock);
 			return -EMSGSIZE;
 		}
 	} else {
@@ -642,13 +639,13 @@ int fwk_ec_cmd_xfer(struct fwk_ec_device *ec_dev, struct fwk_ec_command *msg)
 				"passthru rq of size %u is too big (max: %u)\n",
 				msg->outsize,
 				ec_dev->max_passthru);
-			ec_dev->ec_mutex_unlock(ec_dev);
+			mutex_unlock(&ec_dev->lock);
 			return -EMSGSIZE;
 		}
 	}
 
 	ret = fwk_ec_send_command(ec_dev, msg);
-	ec_dev->ec_mutex_unlock(ec_dev);
+	mutex_unlock(&ec_dev->lock);
 
 	return ret;
 }

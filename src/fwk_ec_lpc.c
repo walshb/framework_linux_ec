@@ -31,10 +31,6 @@
 #define DRV_NAME "fwk_ec_lpcs"
 #define GOOG_DEV_IDX 0
 
-#define ACPI_LOCK_DELAY_MS 500
-
-static int n_debug;
-
 /* Index into fwk_ec_lpc_acpi_device_ids of ACPI device */
 static int fwk_ec_lpc_acpi_device_found;
 
@@ -43,6 +39,7 @@ static int fwk_ec_lpc_acpi_device_found;
  * be used as the base port for EC mapped memory.
  */
 #define FWK_EC_LPC_QUIRK_REMAP_MEMORY              BIT(0)
+#define FWK_EC_LPC_QUIRK_AML_MUTEX                 BIT(1)
 
 /**
  * struct lpc_driver_data - driver data attached to a DMI device ID to indicate
@@ -319,8 +316,9 @@ done:
 	return ret;
 }
 
-static int fwk_ec_lpc_readmem_nolock(struct fwk_ec_device *ec, unsigned int offset,
-				      unsigned int bytes, void *dest)
+/* Returns num bytes read, or negative on error. Doesn't need locking. */
+static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
+			       unsigned int bytes, void *dest)
 {
 	struct fwk_ec_lpc *ec_lpc = ec->priv;
 	int i = offset;
@@ -345,21 +343,6 @@ static int fwk_ec_lpc_readmem_nolock(struct fwk_ec_device *ec, unsigned int offs
 	}
 
 	return cnt;
-}
-
-static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
-			       unsigned int bytes, void *dest)
-{
-	int ret = ec->ec_mutex_lock(ec);
-
-	if (ret)
-		return ret;
-
-	ret = fwk_ec_lpc_readmem_nolock(ec, offset, bytes, dest);
-
-	ec->ec_mutex_unlock(ec);
-
-	return ret;
 }
 
 static void fwk_ec_lpc_acpi_notify(acpi_handle device, u32 value, void *data)
@@ -395,60 +378,6 @@ static void fwk_ec_lpc_acpi_notify(acpi_handle device, u32 value, void *data)
 		pm_system_wakeup();
 }
 
-static int fwk_ec_lpc_mutex_lock(struct fwk_ec_device *ec_dev)
-{
-	bool success = ACPI_SUCCESS(acpi_acquire_mutex(ec_dev->aml_mutex,
-						       NULL, ACPI_LOCK_DELAY_MS));
-	if (n_debug++ < 100)
-		dev_info(ec_dev->dev, "%s, result %d", __func__, (int)success);
-
-	if (!success) {
-		dev_err(ec_dev->dev, "%s failed.", __func__);
-		return -ENODEV;
-	}
-
-	return 0;
-}
-
-static int fwk_ec_lpc_mutex_unlock(struct fwk_ec_device *ec_dev)
-{
-	bool success = ACPI_SUCCESS(acpi_release_mutex(ec_dev->aml_mutex, NULL));
-
-	if (n_debug++ < 100)
-		dev_info(ec_dev->dev, "%s, result %d", __func__, (int)success);
-
-	if (!success) {
-		dev_err(ec_dev->dev, "%s failed.", __func__);
-		return -ENODEV;
-	}
-
-	return 0;
-}
-
-static int fwk_ec_lpc_mutex_init(struct fwk_ec_device *ec_dev,
-				  acpi_handle parent,
-				  const char *aml_mutex_name)
-{
-	int status;
-
-	status = acpi_get_handle(parent,
-				 (acpi_string)aml_mutex_name,
-				 &ec_dev->aml_mutex);
-	if (ACPI_FAILURE(status)) {
-		dev_err(ec_dev->dev, "Failed to get AML mutex '%s': error %d",
-			aml_mutex_name, status);
-		return -ENOENT;
-	}
-
-	dev_info(ec_dev->dev, "Got AML mutex '%s'",
-		 aml_mutex_name);
-
-	ec_dev->ec_mutex_lock = fwk_ec_lpc_mutex_lock;
-	ec_dev->ec_mutex_unlock = fwk_ec_lpc_mutex_unlock;
-
-	return 0;
-}
-
 static int fwk_ec_lpc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -466,6 +395,8 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 
 	ec_lpc->mmio_memory_base = EC_LPC_ADDR_MEMMAP;
 
+	adev = ACPI_COMPANION(dev);
+
 	if (fwk_ec_lpc_driver_data) {
 		quirks = fwk_ec_lpc_driver_data->quirks;
 
@@ -475,6 +406,19 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 		if (quirks & FWK_EC_LPC_QUIRK_REMAP_MEMORY)
 			ec_lpc->mmio_memory_base
 			    = fwk_ec_lpc_driver_data->quirk_mmio_memory_base;
+
+		if (quirks & FWK_EC_LPC_QUIRK_AML_MUTEX) {
+			ret = fwk_ec_lpc_mec_mutex(adev,
+						    fwk_ec_lpc_driver_data->aml_mutex_name);
+			if (ret) {
+				dev_err(dev, "failed to get AML mutex '%s'",
+					fwk_ec_lpc_driver_data->aml_mutex_name);
+				return ret;
+			}
+
+			dev_info(dev, "got AML mutex '%s'",
+				 fwk_ec_lpc_driver_data->aml_mutex_name);
+		}
 	}
 
 	/*
@@ -489,7 +433,7 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	}
 
 	fwk_ec_lpc_mec_init(EC_HOST_CMD_REGION0,
-			     ec_lpc->mmio_memory_base + EC_MEMMAP_SIZE);
+			     EC_LPC_ADDR_MEMMAP + EC_MEMMAP_SIZE);
 
 	/*
 	 * Read the mapped ID twice, the first one is assuming the
@@ -499,34 +443,8 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 	 */
 	fwk_ec_lpc_ops.read = fwk_ec_lpc_mec_read_bytes;
 	fwk_ec_lpc_ops.write = fwk_ec_lpc_mec_write_bytes;
-
-	ec_dev = devm_kzalloc(dev, sizeof(*ec_dev), GFP_KERNEL);
-	if (!ec_dev)
-		return -ENOMEM;
-
-	platform_set_drvdata(pdev, ec_dev);
-	ec_dev->dev = dev;
-	ec_dev->phys_name = dev_name(dev);
-	ec_dev->cmd_xfer = fwk_ec_cmd_xfer_lpc;
-	ec_dev->pkt_xfer = fwk_ec_pkt_xfer_lpc;
-	ec_dev->cmd_readmem = fwk_ec_lpc_readmem_nolock;
-	ec_dev->din_size = sizeof(struct ec_host_response) +
-			   sizeof(struct ec_response_get_protocol_info);
-	ec_dev->dout_size = sizeof(struct ec_host_request);
-	ec_dev->priv = ec_lpc;
-
-	adev = ACPI_COMPANION(dev);
-
-	if (adev && fwk_ec_lpc_driver_data && fwk_ec_lpc_driver_data->aml_mutex_name) {
-		ret = fwk_ec_lpc_mutex_init(ec_dev, adev->handle,
-					     fwk_ec_lpc_driver_data->aml_mutex_name);
-		if (ret)
-			return ret;
-		ec_dev->cmd_readmem = fwk_ec_lpc_readmem;
-	}
-
-	ret = ec_dev->cmd_readmem(ec_dev, EC_MEMMAP_ID, 2, buf);
-	if (ret != 2 || buf[0] != 'E' || buf[1] != 'C') {
+	fwk_ec_lpc_ops.read(EC_LPC_ADDR_MEMMAP + EC_MEMMAP_ID, 2, buf);
+	if (buf[0] != 'E' || buf[1] != 'C') {
 		if (!devm_request_region(dev, ec_lpc->mmio_memory_base, EC_MEMMAP_SIZE,
 					 dev_name(dev))) {
 			dev_err(dev, "couldn't reserve memmap region\n");
@@ -536,10 +454,9 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 		/* Re-assign read/write operations for the non MEC variant */
 		fwk_ec_lpc_ops.read = fwk_ec_lpc_read_bytes;
 		fwk_ec_lpc_ops.write = fwk_ec_lpc_write_bytes;
-		ec_dev->cmd_readmem = fwk_ec_lpc_readmem_nolock;
-
-		ret = ec_dev->cmd_readmem(ec_dev, EC_MEMMAP_ID, 2, buf);
-		if (ret != 2 || buf[0] != 'E' || buf[1] != 'C') {
+		fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + EC_MEMMAP_ID, 2,
+				     buf);
+		if (buf[0] != 'E' || buf[1] != 'C') {
 			dev_err(dev, "EC ID not detected\n");
 			return -ENODEV;
 		}
@@ -557,6 +474,21 @@ static int fwk_ec_lpc_probe(struct platform_device *pdev)
 			return -EBUSY;
 		}
 	}
+
+	ec_dev = devm_kzalloc(dev, sizeof(*ec_dev), GFP_KERNEL);
+	if (!ec_dev)
+		return -ENOMEM;
+
+	platform_set_drvdata(pdev, ec_dev);
+	ec_dev->dev = dev;
+	ec_dev->phys_name = dev_name(dev);
+	ec_dev->cmd_xfer = fwk_ec_cmd_xfer_lpc;
+	ec_dev->pkt_xfer = fwk_ec_pkt_xfer_lpc;
+	ec_dev->cmd_readmem = fwk_ec_lpc_readmem;
+	ec_dev->din_size = sizeof(struct ec_host_response) +
+			   sizeof(struct ec_response_get_protocol_info);
+	ec_dev->dout_size = sizeof(struct ec_host_request);
+	ec_dev->priv = ec_lpc;
 
 	/*
 	 * Some boards do not have an IRQ allotted for fwk_ec_lpc,
@@ -619,6 +551,7 @@ static const struct lpc_driver_data framework_laptop_amd_lpc_driver_data __initc
 };
 
 static const struct lpc_driver_data framework_laptop_11_lpc_driver_data __initconst = {
+	.quirks = FWK_EC_LPC_QUIRK_AML_MUTEX,
 	.aml_mutex_name = "ECMT",
 };
 

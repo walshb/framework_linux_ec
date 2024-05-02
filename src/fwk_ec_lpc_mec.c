@@ -10,12 +10,61 @@
 
 #include "fwk_ec_lpc_mec.h"
 
+#define ACPI_LOCK_DELAY_MS 500
+
 /*
  * This mutex must be held while accessing the EMI unit. We can't rely on the
  * EC mutex because memmap data may be accessed without it being held.
  */
 static DEFINE_MUTEX(io_mutex);
 static u16 mec_emi_base, mec_emi_end;
+static acpi_handle aml_mutex;
+
+static int n_debug;
+
+static int fwk_ec_lpc_mec_lock(void)
+{
+	bool success;
+
+	if (!aml_mutex) {
+		mutex_lock(&io_mutex);
+		return 0;
+	}
+
+	success = ACPI_SUCCESS(acpi_acquire_mutex(aml_mutex,
+						  NULL, ACPI_LOCK_DELAY_MS));
+	if (n_debug++ < 100)
+		pr_info("%s, result %d", __func__, (int)success);
+
+	if (!success) {
+		pr_info("%s failed.", __func__);
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+static int fwk_ec_lpc_mec_unlock(void)
+{
+	bool success;
+
+	if (!aml_mutex) {
+		mutex_unlock(&io_mutex);
+		return 0;
+	}
+
+	success = ACPI_SUCCESS(acpi_release_mutex(aml_mutex, NULL));
+
+	if (n_debug++ < 100)
+		pr_info("%s, result %d", __func__, (int)success);
+
+	if (!success) {
+		pr_err("%s failed.", __func__);
+		return -ENODEV;
+	}
+
+	return 0;
+}
 
 /**
  * fwk_ec_lpc_mec_emi_write_address() - Initialize EMI at a given address.
@@ -77,6 +126,7 @@ u8 fwk_ec_lpc_io_bytes_mec(enum fwk_ec_lpc_mec_io_type io_type,
 	int io_addr;
 	u8 sum = 0;
 	enum fwk_ec_lpc_mec_emi_access_mode access, new_access;
+	int ret;
 
 	/* Return checksum of 0 if window is not initialized */
 	WARN_ON(mec_emi_base == 0 || mec_emi_end == 0);
@@ -92,7 +142,9 @@ u8 fwk_ec_lpc_io_bytes_mec(enum fwk_ec_lpc_mec_io_type io_type,
 	else
 		access = ACCESS_TYPE_LONG_AUTO_INCREMENT;
 
-	mutex_lock(&io_mutex);
+	ret = fwk_ec_lpc_mec_lock();
+	if (ret)
+		return ret;
 
 	/* Initialize I/O at desired address */
 	fwk_ec_lpc_mec_emi_write_address(offset, access);
@@ -134,7 +186,7 @@ u8 fwk_ec_lpc_io_bytes_mec(enum fwk_ec_lpc_mec_io_type io_type,
 	}
 
 done:
-	mutex_unlock(&io_mutex);
+	fwk_ec_lpc_mec_unlock();
 
 	return sum;
 }
@@ -146,3 +198,21 @@ void fwk_ec_lpc_mec_init(unsigned int base, unsigned int end)
 	mec_emi_end = end;
 }
 EXPORT_SYMBOL(fwk_ec_lpc_mec_init);
+
+int fwk_ec_lpc_mec_mutex(struct acpi_device *adev,
+			  const char *aml_mutex_name)
+{
+	int status;
+
+	if (!adev)
+		return -ENOENT;
+
+	status = acpi_get_handle(adev->handle,
+				 (acpi_string)aml_mutex_name,
+				 &aml_mutex);
+	if (ACPI_FAILURE(status))
+		return -ENOENT;
+
+	return 0;
+}
+EXPORT_SYMBOL(fwk_ec_lpc_mec_mutex);

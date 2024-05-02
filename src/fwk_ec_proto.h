@@ -15,8 +15,6 @@
 
 #include <fwk_ec_commands.h>
 
-#include <linux/acpi.h>
-
 #define FWK_EC_DEV_NAME	"cros_ec"
 #define FWK_EC_DEV_FP_NAME	"fwk_fp"
 #define FWK_EC_DEV_ISH_NAME	"fwk_ish"
@@ -181,11 +179,8 @@ struct fwk_ec_device {
 			struct fwk_ec_command *msg);
 	int (*pkt_xfer)(struct fwk_ec_device *ec,
 			struct fwk_ec_command *msg);
-	int (*ec_mutex_lock)(struct fwk_ec_device *ec);
-	int (*ec_mutex_unlock)(struct fwk_ec_device *ec);
 	struct lock_class_key lockdep_key;
 	struct mutex lock;
-	acpi_handle aml_mutex;
 	u8 mkbp_event_supported;
 	bool host_sleep_v1;
 	struct blocking_notifier_head event_notifier;

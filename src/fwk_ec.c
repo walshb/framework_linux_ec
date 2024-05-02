@@ -159,31 +159,13 @@ static int fwk_ec_ready_event(struct notifier_block *nb,
 	u32 host_event = fwk_ec_get_host_event(ec_dev);
 
 	if (host_event & EC_HOST_EVENT_MASK(EC_HOST_EVENT_INTERFACE_READY)) {
-		int ret = ec_dev->ec_mutex_lock(ec_dev);
-
-		if (ret)
-			return notifier_from_errno(ret);
-
+		mutex_lock(&ec_dev->lock);
 		fwk_ec_query_all(ec_dev);
-		ret = ec_dev->ec_mutex_unlock(ec_dev);
-		return notifier_from_errno(ret);
+		mutex_unlock(&ec_dev->lock);
+		return NOTIFY_OK;
 	}
 
 	return NOTIFY_DONE;
-}
-
-static int fwk_ec_mutex_lock(struct fwk_ec_device *ec_dev)
-{
-	mutex_lock(&ec_dev->lock);
-
-	return 0;
-}
-
-static int fwk_ec_mutex_unlock(struct fwk_ec_device *ec_dev)
-{
-	mutex_unlock(&ec_dev->lock);
-
-	return 0;
 }
 
 /**
@@ -217,11 +199,6 @@ int fwk_ec_register(struct fwk_ec_device *ec_dev)
 	ec_dev->dout = devm_kzalloc(dev, ec_dev->dout_size, GFP_KERNEL);
 	if (!ec_dev->dout)
 		return -ENOMEM;
-
-	if (!ec_dev->ec_mutex_lock) {
-		ec_dev->ec_mutex_lock = fwk_ec_mutex_lock;
-		ec_dev->ec_mutex_unlock = fwk_ec_mutex_unlock;
-	}
 
 	lockdep_register_key(&ec_dev->lockdep_key);
 	mutex_init(&ec_dev->lock);
