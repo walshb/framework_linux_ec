@@ -44,7 +44,7 @@ locking.
 ## Can I compile a new kernel instead?
 
 Yes. Please see [here](https://github.com/walshb/linux), branch
-"bw-cros-ec-acpi-mutex-dh-v3".
+"bw-cros-ec-acpi-mutex-v4".
 
 ## Why does `make insmod` dump a stack trace in the log?
 
