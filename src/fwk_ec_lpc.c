@@ -70,8 +70,8 @@ struct fwk_ec_lpc {
  *         the 8-bit checksum of all bytes written.
  */
 struct lpc_driver_ops {
-	u8 (*read)(unsigned int offset, unsigned int length, u8 *dest);
-	u8 (*write)(unsigned int offset, unsigned int length, const u8 *msg);
+	int (*read)(unsigned int offset, unsigned int length, u8 *dest);
+	int (*write)(unsigned int offset, unsigned int length, const u8 *msg);
 };
 
 static struct lpc_driver_ops fwk_ec_lpc_ops = { };
@@ -82,10 +82,10 @@ static const struct lpc_driver_data *fwk_ec_lpc_driver_data;
  * A generic instance of the read function of struct lpc_driver_ops, used for
  * the LPC EC.
  */
-static u8 fwk_ec_lpc_read_bytes(unsigned int offset, unsigned int length,
-				 u8 *dest)
+static int fwk_ec_lpc_read_bytes(unsigned int offset, unsigned int length,
+				  u8 *dest)
 {
-	int sum = 0;
+	u8 sum = 0;
 	int i;
 
 	for (i = 0; i < length; ++i) {
@@ -101,10 +101,10 @@ static u8 fwk_ec_lpc_read_bytes(unsigned int offset, unsigned int length,
  * A generic instance of the write function of struct lpc_driver_ops, used for
  * the LPC EC.
  */
-static u8 fwk_ec_lpc_write_bytes(unsigned int offset, unsigned int length,
-				  const u8 *msg)
+static int fwk_ec_lpc_write_bytes(unsigned int offset, unsigned int length,
+				   const u8 *msg)
 {
-	int sum = 0;
+	u8 sum = 0;
 	int i;
 
 	for (i = 0; i < length; ++i) {
@@ -120,13 +120,18 @@ static u8 fwk_ec_lpc_write_bytes(unsigned int offset, unsigned int length,
  * An instance of the read function of struct lpc_driver_ops, used for the
  * MEC variant of LPC EC.
  */
-static u8 fwk_ec_lpc_mec_read_bytes(unsigned int offset, unsigned int length,
-				     u8 *dest)
+static int fwk_ec_lpc_mec_read_bytes(unsigned int offset, unsigned int length,
+				      u8 *dest)
 {
-	int in_range = fwk_ec_lpc_mec_in_range(offset, length);
+	int in_range;
+
+	if (length == 0)
+		return 0;
+
+	in_range = fwk_ec_lpc_mec_in_range(offset, length);
 
 	if (in_range < 0)
-		return 0;
+		return in_range;
 
 	return in_range ?
 		fwk_ec_lpc_io_bytes_mec(MEC_IO_READ,
@@ -139,13 +144,18 @@ static u8 fwk_ec_lpc_mec_read_bytes(unsigned int offset, unsigned int length,
  * An instance of the write function of struct lpc_driver_ops, used for the
  * MEC variant of LPC EC.
  */
-static u8 fwk_ec_lpc_mec_write_bytes(unsigned int offset, unsigned int length,
-				      const u8 *msg)
+static int fwk_ec_lpc_mec_write_bytes(unsigned int offset, unsigned int length,
+				       const u8 *msg)
 {
-	int in_range = fwk_ec_lpc_mec_in_range(offset, length);
+	int in_range;
+
+	if (length == 0)
+		return 0;
+
+	in_range = fwk_ec_lpc_mec_in_range(offset, length);
 
 	if (in_range < 0)
-		return 0;
+		return in_range;
 
 	return in_range ?
 		fwk_ec_lpc_io_bytes_mec(MEC_IO_WRITE,
@@ -158,11 +168,14 @@ static int ec_response_timed_out(void)
 {
 	unsigned long one_second = jiffies + HZ;
 	u8 data;
+	int ret;
 
 	usleep_range(200, 300);
 	do {
-		if (!(fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_CMD, 1, &data) &
-		    EC_LPC_STATUS_BUSY_MASK))
+		ret = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_CMD, 1, &data);
+		if (ret < 0)
+			return ret;
+		if (!(data & EC_LPC_STATUS_BUSY_MASK))
 			return 0;
 		usleep_range(100, 200);
 	} while (time_before(jiffies, one_second));
@@ -183,28 +196,41 @@ static int fwk_ec_pkt_xfer_lpc(struct fwk_ec_device *ec,
 		goto done;
 
 	/* Write buffer */
-	fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_PACKET, ret, ec->dout);
+	ret = fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_PACKET, ret, ec->dout);
+	if (ret < 0)
+		goto done;
 
 	/* Here we go */
 	sum = EC_COMMAND_PROTOCOL_3;
-	fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_CMD, 1, &sum);
+	ret = fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_CMD, 1, &sum);
+	if (ret < 0)
+		goto done;
 
-	if (ec_response_timed_out()) {
+	ret = ec_response_timed_out();
+	if (ret < 0)
+		goto done;
+	if (ret) {
 		dev_warn(ec->dev, "EC response timed out\n");
 		ret = -EIO;
 		goto done;
 	}
 
 	/* Check result */
-	msg->result = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_DATA, 1, &sum);
+	ret = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_DATA, 1, &sum);
+	if (ret < 0)
+		goto done;
+	msg->result = sum;
 	ret = fwk_ec_check_result(ec, msg);
 	if (ret)
 		goto done;
 
 	/* Read back response */
 	dout = (u8 *)&response;
-	sum = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_PACKET, sizeof(response),
+	ret = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_PACKET, sizeof(response),
 				   dout);
+	if (ret < 0)
+		goto done;
+	sum = ret;
 
 	msg->result = response.result;
 
@@ -217,9 +243,13 @@ static int fwk_ec_pkt_xfer_lpc(struct fwk_ec_device *ec,
 	}
 
 	/* Read response and process checksum */
-	sum += fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_PACKET +
-				    sizeof(response), response.data_len,
-				    msg->data);
+	ret = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_PACKET +
+				   sizeof(response), response.data_len,
+				   msg->data);
+	if (ret < 0)
+		goto done;
+
+	sum += ret;
 
 	if (sum) {
 		dev_err(ec->dev,
@@ -259,32 +289,47 @@ static int fwk_ec_cmd_xfer_lpc(struct fwk_ec_device *ec,
 	sum = msg->command + args.flags + args.command_version + args.data_size;
 
 	/* Copy data and update checksum */
-	sum += fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_PARAM, msg->outsize,
-				     msg->data);
+	ret = fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_PARAM, msg->outsize,
+				    msg->data);
+	if (ret < 0)
+		goto done;
+	sum += ret;
 
 	/* Finalize checksum and write args */
 	args.checksum = sum;
-	fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_ARGS, sizeof(args),
-			      (u8 *)&args);
+	ret = fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_ARGS, sizeof(args),
+				    (u8 *)&args);
+	if (ret < 0)
+		goto done;
 
 	/* Here we go */
 	sum = msg->command;
-	fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_CMD, 1, &sum);
+	ret = fwk_ec_lpc_ops.write(EC_LPC_ADDR_HOST_CMD, 1, &sum);
+	if (ret < 0)
+		goto done;
 
-	if (ec_response_timed_out()) {
+	ret = ec_response_timed_out();
+	if (ret < 0)
+		goto done;
+	if (ret) {
 		dev_warn(ec->dev, "EC response timed out\n");
 		ret = -EIO;
 		goto done;
 	}
 
 	/* Check result */
-	msg->result = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_DATA, 1, &sum);
+	ret = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_DATA, 1, &sum);
+	if (ret < 0)
+		goto done;
+	msg->result = sum;
 	ret = fwk_ec_check_result(ec, msg);
 	if (ret)
 		goto done;
 
 	/* Read back args */
-	fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_ARGS, sizeof(args), (u8 *)&args);
+	ret = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_ARGS, sizeof(args), (u8 *)&args);
+	if (ret < 0)
+		goto done;
 
 	if (args.data_size > msg->insize) {
 		dev_err(ec->dev,
@@ -298,8 +343,11 @@ static int fwk_ec_cmd_xfer_lpc(struct fwk_ec_device *ec,
 	sum = msg->command + args.flags + args.command_version + args.data_size;
 
 	/* Read response and update checksum */
-	sum += fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_PARAM, args.data_size,
+	ret = fwk_ec_lpc_ops.read(EC_LPC_ADDR_HOST_PARAM, args.data_size,
 				    msg->data);
+	if (ret < 0)
+		goto done;
+	sum += ret;
 
 	/* Verify checksum */
 	if (args.checksum != sum) {
@@ -324,19 +372,24 @@ static int fwk_ec_lpc_readmem(struct fwk_ec_device *ec, unsigned int offset,
 	int i = offset;
 	char *s = dest;
 	int cnt = 0;
+	int ret;
 
 	if (offset >= EC_MEMMAP_SIZE - bytes)
 		return -EINVAL;
 
 	/* fixed length */
 	if (bytes) {
-		fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + offset, bytes, s);
+		ret = fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + offset, bytes, s);
+		if (ret < 0)
+			return ret;
 		return bytes;
 	}
 
 	/* string */
 	for (; i < EC_MEMMAP_SIZE; i++, s++) {
-		fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + i, 1, s);
+		ret = fwk_ec_lpc_ops.read(ec_lpc->mmio_memory_base + i, 1, s);
+		if (ret < 0)
+			return ret;
 		cnt++;
 		if (!*s)
 			break;

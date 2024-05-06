@@ -69,9 +69,9 @@ int fwk_ec_lpc_mec_in_range(unsigned int offset, unsigned int length);
  * @length:  Number of bytes to read / write
  * @buf:     Destination / source buffer
  *
- * @return 8-bit checksum of all bytes read / written
+ * @return: a negative error code on error, or the 8-bit checksum
  */
-u8 fwk_ec_lpc_io_bytes_mec(enum fwk_ec_lpc_mec_io_type io_type,
-			    unsigned int offset, unsigned int length, u8 *buf);
+int fwk_ec_lpc_io_bytes_mec(enum fwk_ec_lpc_mec_io_type io_type,
+			     unsigned int offset, unsigned int length, u8 *buf);
 
 #endif /* __FWK_EC_LPC_MEC_H */
