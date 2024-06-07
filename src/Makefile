@@ -12,7 +12,7 @@ DEPMODBASEDIR ?= /
 all: module
 
 module:
-	$(MAKE) -C $(KERNELDIR) M=$(CURDIR) V=1 modules
+	$(MAKE) -j$$(nproc) -C $(KERNELDIR) M=$(CURDIR) V=1 modules
 
 clean:
 	$(MAKE) -C $(KERNELDIR) M=$(CURDIR) clean
