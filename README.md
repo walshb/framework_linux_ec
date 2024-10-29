@@ -1,3 +1,8 @@
+### This repository contains source code for Linux drivers.
+### As of kernel 6.11, the changes have been merged into the kernel source, and this code is not needed.
+
+Please see below for more information.
+
 ## What is this?
 
 This is the source code for replacemant "cros\_ec" modules for Linux.
@@ -12,6 +17,23 @@ These are caused by ACPI AML and the "cros\_ec" modules both trying to
 access the EC at the same time.
 
 The new code makes the "cros\_ec" modules use the AML mutex.
+
+## Do I need it?
+
+Only if you are using a 11th/12th/13th generation Intel Framework
+Laptop, and you are running Linux kernel older than 6.11.
+
+## I've upgraded to kernel 6.11. How do I uninstall these modules?
+
+If you've already installed using DKMS, do this:
+
+```
+dkms status  # check for "fwk_ec" module versions
+sudo dkms remove -m fwk_ec -v 4.0.0  # the version you have
+sudo rm /etc/modprobe.d/cros_ec_blacklist.conf
+sudo update-initramfs -u
+# now reboot...
+```
 
 ## How do I build and install?
 
